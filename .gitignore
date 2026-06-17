@@ -16,5 +16,9 @@ trading.db-shm
 trading.db-wal
 trading.db.bak-*
 
+# État runtime du forward-test (portefeuille virtuel, persiste hors git)
+forward_state.json
+forward_state.json.tmp
+
 # Sortie watcher
 trade_watcher.py
