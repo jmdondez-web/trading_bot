@@ -49,6 +49,9 @@ def simulate_portfolio(data, elig_by_symbol, p, start_capital, timeline=None,
     smult = p.get('stop', Config.STOP_LOSS_ATR_MULTIPLIER)
     tmult = p.get('trail', Config.TRAILING_ATR_MULTIPLIER)
     activ = p.get('activ', Config.TRAILING_STOP_ACTIVATION)
+    # cap adaptatif optionnel : limite la distance de stop INITIALE à stop_cap%
+    # du prix d'entrée (ne mord que sur les paires à fort ATR, sinon inerte).
+    stop_cap = p.get('stop_cap')
     tp_frac = p['tp'] / 100.0
     tp_size = p['tp_size'] / 100.0
     max_pos = Config.MAX_POSITIONS
@@ -153,8 +156,11 @@ def simulate_portfolio(data, elig_by_symbol, p, start_capital, timeline=None,
             qty = capital / price
             cost = capital * (1 + FEE)   # notional + frais d'achat
             cash -= cost
+            stop_dist = a * smult
+            if stop_cap:
+                stop_dist = min(stop_dist, price * stop_cap)   # plafond adaptatif
             positions[sym] = {
-                'entry': price, 'stop': price - a * smult, 'qty': qty,
+                'entry': price, 'stop': price - stop_dist, 'qty': qty,
                 'tp_price': price * (1 + tp_frac), 'cost': cost, 'proceeds': 0.0,
             }
 

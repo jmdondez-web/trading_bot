@@ -8,7 +8,8 @@ Stratégie (config validée par backtest_v3.py, +10.7%/90j, DD 2%, robuste 30/60
   - Timeframe 1h
   - Entrée : croisement haussier EMA 5/20 (acheter la FORCE)
   - Filtre de régime BTC (vue extérieure) : on n'ouvre QUE si BTC > SMA200(1h) ET montante
-  - Sortie : stop ATR×2.0 (coupe vite) + trailing ATR×5.0 (laisse courir),
+  - Sortie : stop initial = min(ATR×2.0, 3% du prix) [cap adaptatif fort ATR] (coupe vite)
+             + trailing ATR×5.0 (laisse courir),
              + TP partiel à +4% sur 50% de la position, activation trailing à +1.5%
   - Portefeuille partagé : max 3 positions, allocation 50/30/20, 95% du cash, frais 0.1%/leg
 
@@ -39,6 +40,7 @@ EMA_FAST        = 5
 EMA_SLOW        = 20
 BTC_SMA         = 200
 STOP_ATR        = 2.0
+STOP_CAP        = 0.03              # cap adaptatif : stop initial = min(ATR×2, 3% du prix)
 TRAIL_ATR       = 5.0
 TRAIL_ACTIV     = 0.015              # +1.5% avant d'armer le trailing
 TP_PCT          = 0.04              # TP partiel à +4%
@@ -208,14 +210,16 @@ def try_entry(state, sym, df):
     qty = capital / price
     cost = capital * (1 + FEE)
     state['cash'] -= cost
+    stop_dist = min(a * STOP_ATR, price * STOP_CAP)   # cap adaptatif (mord sur fort ATR)
+    stop_price = price - stop_dist
     state['positions'][sym] = {
-        "entry": price, "qty": qty, "stop": price - a * STOP_ATR,
+        "entry": price, "qty": qty, "stop": stop_price,
         "tp_price": price * (1 + TP_PCT), "cost": cost, "proceeds": 0.0,
         "opened": datetime.utcnow().isoformat(),
     }
-    log.info(f"ENTRÉE {sym} @ {price:.4f} | qty={qty:.6f} stop={price - a*STOP_ATR:.4f} "
-             f"tp={price*(1+TP_PCT):.4f} | capital={capital:.2f} (split {split})")
-    tg_send(f"ENTRÉE {sym} @ {price:.4f}\nstop {price - a*STOP_ATR:.4f} | tp {price*(1+TP_PCT):.4f} "
+    log.info(f"ENTRÉE {sym} @ {price:.4f} | qty={qty:.6f} stop={stop_price:.4f} "
+             f"({stop_dist/price*100:.1f}%) tp={price*(1+TP_PCT):.4f} | capital={capital:.2f} (split {split})")
+    tg_send(f"ENTRÉE {sym} @ {price:.4f}\nstop {stop_price:.4f} | tp {price*(1+TP_PCT):.4f} "
             f"| mise {capital:.2f} USDC")
 
 
@@ -224,7 +228,8 @@ def main():
     log.info("FORWARD-TEST MOMENTUM (paper-trading) démarré")
     log.info(f"Capital virtuel départ: {START_CAPITAL} USDC | univers: {UNIVERSE}")
     log.info(f"Config: 1h EMA{EMA_FAST}/{EMA_SLOW} | filtre BTC>SMA{BTC_SMA} montante | "
-             f"stop ATR×{STOP_ATR} trail ATR×{TRAIL_ATR} TP+{TP_PCT*100:.0f}%×{TP_SIZE*100:.0f}%")
+             f"stop min(ATR×{STOP_ATR}, {STOP_CAP*100:.0f}%) trail ATR×{TRAIL_ATR} "
+             f"TP+{TP_PCT*100:.0f}%×{TP_SIZE*100:.0f}%")
     binance = BinanceClientWrapper()
     state = load_state()
     log.info(f"État chargé: cash={state['cash']:.2f} positions={list(state['positions'])} "
