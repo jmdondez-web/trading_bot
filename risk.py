@@ -43,11 +43,15 @@ class RiskManager:
 
     def check_take_profit(self):
         for pos in self.db.get_positions():
+            # FIX (revue 2026-09-30): ignorer les positions PENDING (ordre limite
+            # pas encore execute). Sinon le TP pouvait vendre un actif jamais achete.
+            if pos.get('status') == 'PENDING': continue
             if pos.get('tp_triggered'): continue
             tp = Config.SCALP_TAKE_PROFIT if Config.SCALP_MODE else Config.TAKE_PROFIT_PERCENT
             if tp <= 0: continue
             # FIX: prix depuis cache — évite un appel API séparé de check_stop_loss
-            cp = self._get_cached_price(pos['symbol'])
+        
+    cp = self._get_cached_price(pos['symbol'])
             if not cp: continue
             entry = float(pos['entry_price'])
             gain = (cp - entry) / entry * 100
@@ -80,10 +84,14 @@ class RiskManager:
 
     def check_stop_loss(self):
         for pos in self.db.get_positions():
+            # FIX (revue 2026-09-30): ignorer les positions PENDING (ordre limite
+            # pas encore execute) — ne jamais stopper/vendre ce qui n'est pas achete.
+            if pos.get('status') == 'PENDING': continue
             # FIX: prix depuis cache — si check_take_profit vient de passer,
             # le prix est déjà là, pas de second appel API
             cp = self._get_cached_price(pos['symbol'])
-            if not cp: continue
+    
+        if not cp: continue
             entry = float(pos['entry_price'])
             current_stop = float(pos.get('current_stop', pos['initial_stop']))
 
@@ -120,7 +128,8 @@ class RiskManager:
                 order = self.orders.place_market_sell_order(pos['symbol'], qty)
                 if order:
                     self.db.add_trade({
-                        'symbol': pos['symbol'], 'entry_price': entry, 'exit_price': cp,
+                        'symbol': pos['symbol'], 'entry_price': entry, 'exit_pric
+e': cp,
                         'pnl_pct': pnl_pct, 'pnl_usdc': pnl_usdc_net,  # FIX: net
                         'exit_reason': reason
                     })
