@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from unittest.mock import Mock
 from config import Config
 from risk import RiskManager
@@ -60,9 +61,6 @@ class TestRiskManagerPending(unittest.TestCase):
         self.binance.get_current_price.return_value = None
         self.risk.check_stop_loss()
         self.orders.place_market_sell_order.assert_not_called()
-
-
-from datetime import datetime  # noqa: E402  (utilise par make_pos)
 
 
 if __name__ == '__main__':
