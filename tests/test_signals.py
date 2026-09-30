@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
+import pandas as pd
 from unittest.mock import Mock
 from config import Config
 from signals import SignalManager
@@ -13,6 +14,9 @@ class TestSignalManager(unittest.TestCase):
         self.risk = Mock()
         self.telegram = Mock()
         self.sm = SignalManager(self.db, self.binance, self.orders, self.risk, self.telegram)
+        self.scanner = Mock()
+        self.scanner.scan.return_value = []
+        Config.AUTO_SCAN = False
         self.db.get_positions.return_value = []
         self.db.get_last_signal.return_value = None
         self.db.count_positions.return_value = 0
@@ -25,6 +29,7 @@ class TestSignalManager(unittest.TestCase):
         Config.SCALP_MODE = False
         Config.TURBO_MODE = False
         Config.MAX_POSITIONS = 3
+        Config.AUTO_SCAN = True
 
     def test_anti_correlation_blocks_same_group(self):
         # BTC ouvert -> ETH (meme groupe) bloque
@@ -61,15 +66,18 @@ class TestSignalManager(unittest.TestCase):
     def test_execute_signal_max_positions(self):
         self.db.count_positions.return_value = 3
         Config.MAX_POSITIONS = 3
+        Config.AUTO_SCAN = True
         self.assertFalse(self.sm.execute_signal({'symbol': 'BTCUSDC', 'price': 100.0, 'atr': 1.0}))
 
     def test_scan_respects_open_positions(self):
         # une paire deja en position ne doit pas etre re-scannee
         self.db.get_positions.return_value = [{'symbol': 'BTCUSDC'}]
-        self.binance.get_klines.return_value = None  # jamais appele si skip
-        signals = self.sm.scan_all_pairs(Mock())
-        self.assertEqual(signals, [])
-        self.binance.get_klines.assert_not_called()
+        self.binance.get_klines.return_value = pd.DataFrame()  # jamais appele si skip
+        signals = self.sm.scan_all_pairs(self.scanner)
+        self.assertEqual(signals, [])  # df vide -> aucun signal
+        scanned = [c.args[0] for c in self.binance.get_klines.call_args_list]
+        self.assertNotIn('BTCUSDC', scanned)  # la paire ouverte n est jamais re-scannee
+        self.assertIn('ETHUSDC', scanned)     # les autres paires le sont
 
 
 if __name__ == '__main__':

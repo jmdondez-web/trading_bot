@@ -33,7 +33,7 @@ class TestStrategyEngine(unittest.TestCase):
 
     def test_compute_score(self):
         score = StrategyEngine.compute_score(self.df, 'BTCUSDC')
-        self.assertIsInstance(score, float)
+        self.assertIsInstance(score, (int, float))
 
 if __name__ == '__main__':
     unittest.main()

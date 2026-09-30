@@ -27,9 +27,6 @@ class TradingCommittee:
         votes = []
         vote_details = []
 
-        votes = []
-        vote_details = []
-
         # FIX (revue 2026-09-30): vraie abstention. Une erreur API (_ask_* -> None)
         # n'est plus comptee comme un vote NON ; et le vote accepte OUI comme YES
         # (les modeles repondent souvent en anglais).
@@ -57,8 +54,7 @@ class TradingCommittee:
             )
             return False
 
-    
-    accepted = sum(1 for v in votes if v)
+        accepted = sum(1 for v in votes if v)
         # Quorum adapté : si moins de 3 modèles disponibles, on abaisse le seuil
         quorum = min(Config.COMMITTEE_VOTE_MIN, len(votes))
         result = "ACCEPTED" if accepted >= quorum else "REJECTED"
@@ -107,8 +103,7 @@ class TradingCommittee:
             logger.warning(f"Claude erreur (abstention): {e}")
             return None
 
-    def _ask_g
-pt(self, signal):
+    def _ask_gpt(self, signal):
         try:
             prompt = self._build_prompt(signal)
             resp = requests.post(
