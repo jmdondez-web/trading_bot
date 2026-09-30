@@ -1,0 +1,15 @@
+[Unit]
+Description=JM Trading Bot V3.4
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=worff
+WorkingDirectory=/home/worff/trading_bot
+ExecStart=/home/worff/trading_bot/venv/bin/python /home/worff/trading_bot/bot_v3_4.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
