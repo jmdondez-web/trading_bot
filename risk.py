@@ -43,6 +43,9 @@ class RiskManager:
 
     def check_take_profit(self):
         for pos in self.db.get_positions():
+            # FIX (revue 2026-09-30): ignorer les positions PENDING (ordre limite
+            # pas encore execute) — sinon le TP peut vendre un actif jamais achete.
+            if pos.get('status') == 'PENDING': continue
             if pos.get('tp_triggered'): continue
             tp = Config.SCALP_TAKE_PROFIT if Config.SCALP_MODE else Config.TAKE_PROFIT_PERCENT
             if tp <= 0: continue
@@ -80,6 +83,9 @@ class RiskManager:
 
     def check_stop_loss(self):
         for pos in self.db.get_positions():
+            # FIX (revue 2026-09-30): ignorer les positions PENDING (ordre limite
+            # pas encore execute) — ne jamais stopper ce qui n'est pas achete.
+            if pos.get('status') == 'PENDING': continue
             # FIX: prix depuis cache — si check_take_profit vient de passer,
             # le prix est déjà là, pas de second appel API
             cp = self._get_cached_price(pos['symbol'])

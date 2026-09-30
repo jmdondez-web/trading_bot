@@ -27,26 +27,23 @@ class TradingCommittee:
         votes = []
         vote_details = []
 
-        if Config.CLAUDE_API_KEY:
-            v = self._ask_claude(signal)
-            votes.append(v)
-            vote_details.append(f"Claude={'OUI' if v else 'NON'}")
-        else:
-            vote_details.append("Claude=ABSENT")
-
-        if Config.OPENAI_API_KEY:
-            v = self._ask_gpt(signal)
-            votes.append(v)
-            vote_details.append(f"GPT={'OUI' if v else 'NON'}")
-        else:
-            vote_details.append("GPT=ABSENT")
-
-        if Config.GEMINI_API_KEY:
-            v = self._ask_gemini(signal)
-            votes.append(v)
-            vote_details.append(f"Gemini={'OUI' if v else 'NON'}")
-        else:
-            vote_details.append("Gemini=ABSENT")
+        # FIX (revue 2026-09-30): vraie abstention. Une erreur API (_ask_* -> None)
+        # n'est plus comptee comme un vote NON ; et le vote accepte OUI comme YES
+        # (les modeles repondent souvent en anglais).
+        for label, api_key, ask in (
+            ("Claude", Config.CLAUDE_API_KEY, self._ask_claude),
+            ("GPT", Config.OPENAI_API_KEY, self._ask_gpt),
+            ("Gemini", Config.GEMINI_API_KEY, self._ask_gemini),
+        ):
+            if not api_key:
+                vote_details.append(f"{label}=ABSENT")
+                continue
+            v = ask(signal)
+            if v is None:
+                vote_details.append(f"{label}=ABSTENTION")
+            else:
+                votes.append(v)
+                vote_details.append(f"{label}={'OUI' if v else 'NON'}")
 
         # FIX: si aucune clé configurée, le comité ne peut pas voter
         # -> on rejette plutôt que d'approuver aveuglément
@@ -100,11 +97,11 @@ class TradingCommittee:
                 timeout=self.timeout
             )
             text = resp.json().get('content', [{}])[0].get('text', '').upper()
-            return "OUI" in text
+            return "OUI" in text or "YES" in text
         except Exception as e:
             # FIX: erreur = abstention (False) plutôt que vote OUI par défaut
             logger.warning(f"Claude erreur (abstention): {e}")
-            return False
+            return None
 
     def _ask_gpt(self, signal):
         try:
@@ -123,11 +120,11 @@ class TradingCommittee:
                 timeout=self.timeout
             )
             text = resp.json()['choices'][0]['message']['content'].upper()
-            return "OUI" in text
+            return "OUI" in text or "YES" in text
         except Exception as e:
             # FIX: erreur = abstention (False) plutôt que vote OUI par défaut
             logger.warning(f"GPT erreur (abstention): {e}")
-            return False
+            return None
 
     def _ask_gemini(self, signal):
         try:
@@ -139,11 +136,11 @@ class TradingCommittee:
                 timeout=self.timeout
             )
             text = resp.json()['candidates'][0]['content']['parts'][0]['text'].upper()
-            return "OUI" in text
+            return "OUI" in text or "YES" in text
         except Exception as e:
             # FIX: erreur = abstention (False) plutôt que vote OUI par défaut
             logger.warning(f"Gemini erreur (abstention): {e}")
-            return False
+            return None
 
     def get_stats(self):
         return self.db.get_committee_stats()
