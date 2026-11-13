@@ -21,9 +21,6 @@ class Database:
                     key TEXT PRIMARY KEY, value TEXT)""")
                 conn.execute("""CREATE TABLE IF NOT EXISTS last_signal (
                     symbol TEXT PRIMARY KEY, timestamp TEXT)""")
-                conn.execute("""CREATE TABLE IF NOT EXISTS committee_votes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT,
-                    timestamp TEXT, vote1 TEXT, vote2 TEXT, vote3 TEXT, result TEXT)""")
                 conn.execute("""CREATE TABLE IF NOT EXISTS rejected_orders (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT,
                     reason TEXT, timestamp TEXT)""")
@@ -121,21 +118,6 @@ class Database:
             with sqlite3.connect(Config.DB_FILE) as conn:
                 conn.execute("INSERT OR REPLACE INTO last_signal VALUES (?,?)", (symbol, datetime.now().isoformat()))
                 conn.commit()
-
-    def add_committee_vote(self, symbol, votes, result):
-        with self.lock:
-            with sqlite3.connect(Config.DB_FILE) as conn:
-                conn.execute("INSERT INTO committee_votes (symbol,timestamp,vote1,vote2,vote3,result) VALUES (?,?,?,?,?,?)",
-                    (symbol, datetime.now().isoformat(), str(votes[0]), str(votes[1]), str(votes[2]), result))
-                conn.commit()
-
-    def get_committee_stats(self):
-        with self.lock:
-            with sqlite3.connect(Config.DB_FILE) as conn:
-                total = conn.execute("SELECT COUNT(*) FROM committee_votes").fetchone()[0]
-                if total == 0: return {"total": 0, "accept_rate": 0}
-                accepted = conn.execute("SELECT COUNT(*) FROM committee_votes WHERE result='ACCEPTED'").fetchone()[0]
-                return {"total": total, "accept_rate": round(accepted / total * 100, 1)}
 
     def add_rejected_order(self, symbol, reason):
         with self.lock:

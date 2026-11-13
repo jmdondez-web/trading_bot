@@ -47,7 +47,7 @@ class RiskManager:
             # pas encore execute) — sinon le TP peut vendre un actif jamais achete.
             if pos.get('status') == 'PENDING': continue
             if pos.get('tp_triggered'): continue
-            tp = Config.SCALP_TAKE_PROFIT if Config.SCALP_MODE else Config.TAKE_PROFIT_PERCENT
+            tp = Config.TAKE_PROFIT_PERCENT
             if tp <= 0: continue
             # FIX: prix depuis cache — évite un appel API séparé de check_stop_loss
             cp = self._get_cached_price(pos['symbol'])
@@ -94,7 +94,7 @@ class RiskManager:
             current_stop = float(pos.get('current_stop', pos['initial_stop']))
 
             if cp > entry:
-                atr_mult = Config.SCALP_STOP_LOSS_ATR if Config.SCALP_MODE else Config.TRAILING_ATR_MULTIPLIER
+                atr_mult = Config.TRAILING_ATR_MULTIPLIER
                 gain_pct = (cp - entry) / entry
 
                 if Config.USE_TRAILING_ATR:

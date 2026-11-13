@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from config import Config
 from strategy import StrategyEngine
-from backtest_v2 import precompute, eligibility
+from backtest_v3 import precompute, eligibility
 
 
 def synthetic_df(n=300, seed=42):

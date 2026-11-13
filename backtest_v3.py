@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Backtest V3 — capital fictif partagé qui se compose.
 
-Différence clé vs backtest_v2.py :
+Différence clé vs l'ancien backtest v2 (supprimé lors du nettoyage) :
  - v2 raisonnait par trade à notional fixe (100/trade), symboles indépendants.
  - v3 simule UN portefeuille fictif unique (défaut 500 USDC) partagé entre les 4
    symboles, sur une timeline chronologique commune, en répliquant la vraie
@@ -27,8 +27,74 @@ from binance.client import Client
 from config import Config
 from strategy import StrategyEngine
 
-# Réutilise les briques éprouvées de v2 (indicateurs + éligibilité d'entrée)
-from backtest_v2 import fetch, precompute, eligibility, FEE, CORE
+# Briques d'indicateurs et d'éligibilité (ex-backtest_v2, intégrées ici lors du
+# nettoyage piste 2 — v2 supprimé). Causales : aucun indicateur à t ne dépend de t+k.
+FEE = 0.001  # 0.1% par leg
+CORE = ["BTCUSDC", "ETHUSDC", "SOLUSDC", "BNBUSDC"]
+
+
+def fetch(client, symbol, days):
+    raw = client.get_historical_klines(symbol, Client.KLINE_INTERVAL_5MINUTE, f"{days} day ago UTC")
+    df = pd.DataFrame(raw, columns=['timestamp','open','high','low','close','volume',
+        'ct','qav','not','tbb','tbq','ig'])
+    for c in ['open','high','low','close']:
+        df[c] = df[c].astype(float)
+    return df
+
+
+def precompute(df):
+    """Indicateurs causaux + parties config-indépendantes de la décision d'entrée,
+    calculés une seule fois pour toute la série."""
+    from strategy import RSI_RISING_TICKS as T
+    close = df['close']
+    rsi = StrategyEngine.calculate_rsi(close)
+    bb = StrategyEngine.calculate_bollinger(close, Config.BB_PERIOD, Config.BB_STD)
+    macd_line, signal_line, _ = StrategyEngine.calculate_macd(close)
+    atr = StrategyEngine.calculate_atr(df)
+
+    c = close.values; lo = bb.lower.values; w = bb.width.values
+    ref = np.where(np.isnan(bb.ref.values), 0.05, bb.ref.values)
+    rsi_v = rsi.values
+
+    # contexte vectorisé
+    is_chaos = w > ref * 1.5
+    lb = Config.BAND_WALK_LOOKBACK
+    n = len(c)
+    band_walk = np.zeros(n, dtype=bool)
+    for i in range(lb, n):
+        rc = c[i-lb+1:i+1]; rl = lo[i-lb+1:i+1]
+        band_walk[i] = (rc <= rl).all() and rl[-1] < rl[0]
+    vr = np.where(ref > 0, w / ref, 1.0)
+    ctx_range = (~is_chaos) & (~band_walk) & (vr < Config.RANGE_VR_THRESHOLD)
+
+    # RSI rising T ticks (config-indépendant)
+    rising = np.zeros(n, dtype=bool)
+    for i in range(T, n):
+        tail = rsi_v[i-T:i+1]
+        if not np.isnan(tail).any():
+            rising[i] = all(tail[k] < tail[k+1] for k in range(T))
+
+    dist_lower = np.where(lo > 0, (c - lo) / lo, 1.0)  # distance relative à la bande basse
+    macd_bull = macd_line.values > signal_line.values
+    valid = ~(np.isnan(rsi_v) | np.isnan(lo) | np.isnan(w))
+
+    return {
+        'close': c.tolist(), 'high': df['high'].values.tolist(), 'low': df['low'].values.tolist(),
+        'atr': atr.values.tolist(), 'rsi': rsi_v, 'dist_lower': dist_lower,
+        'ctx_range': ctx_range, 'rising': rising, 'macd_bull': macd_bull, 'valid': valid,
+        'price_at_lower': c <= lo, 'n': n,
+    }
+
+
+def eligibility(ind, symbol, margin, rsi_set, macd_filter):
+    """Booléen vectorisé d'éligibilité à l'entrée pour une config donnée (entrée only)."""
+    threshold = rsi_set.get(symbol, 38)
+    near = ind['price_at_lower'] | ((margin > 0) & (ind['dist_lower'] <= margin / 100))
+    elig = ind['valid'] & ind['ctx_range'] & near & (ind['rsi'] <= threshold) & ind['rising']
+    if macd_filter:
+        elig = elig & ind['macd_bull']
+    return elig.tolist()
+
 
 
 def simulate_portfolio(data, elig_by_symbol, p, start_capital, timeline=None,

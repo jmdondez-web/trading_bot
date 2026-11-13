@@ -7,10 +7,9 @@ from config import Config
 logger = logging.getLogger("WebSocketClient")
 
 class WebSocketClient:
-    def __init__(self, binance_client, risk_manager, dust_manager):
+    def __init__(self, binance_client, risk_manager):
         self.binance = binance_client
         self.risk = risk_manager
-        self.dust = dust_manager
         self.running = False
         self.callbacks = []
 
@@ -27,10 +26,6 @@ class WebSocketClient:
         while self.running:
             try:
                 self._check_orders()
-                # FIX: dust.check_and_clean() supprimé d'ici.
-                # Il était appelé toutes les 2s EN PARALLÈLE de la boucle principale
-                # → risque de double vente du même asset si DUST_AUTO_SELL=True.
-                # La boucle principale (bot_v3.4.py) reste le seul appelant.
             except Exception as e:
                 logger.debug(f"WebSocket poll: {e}")
             time.sleep(2)
