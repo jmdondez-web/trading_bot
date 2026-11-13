@@ -21,7 +21,7 @@ class BinanceClientWrapper:
         logger.info(f"Binance {'Testnet' if testnet else 'OK'}")
 
         # FIX: cache centralisé pour get_current_price()
-        # Avant: chaque module (risk, dashboard, signals) appelait get_current_price()
+        # Avant: chaque module (risk, signals) appelait get_current_price()
         # indépendamment -> N appels API pour le même symbol dans le même cycle.
         # Maintenant: un seul appel par symbol par TTL, partagé entre tous les appelants.
         # TTL=3s : prix suffisamment frais pour le trading 5m, sans saturer l'API.
@@ -37,8 +37,7 @@ class BinanceClientWrapper:
 
     def get_klines(self, symbol, limit=100, interval=None):
         if interval is None:
-            interval = Client.KLINE_INTERVAL_1MINUTE if Config.SCALP_MODE \
-                else Client.KLINE_INTERVAL_5MINUTE
+            interval = Client.KLINE_INTERVAL_5MINUTE
         try:
             candles = self.client.get_klines(symbol=symbol, interval=interval, limit=limit)
             df = pd.DataFrame(candles, columns=[
@@ -72,7 +71,7 @@ class BinanceClientWrapper:
             return 0.0
 
     def get_current_price(self, symbol):
-        """Prix avec cache TTL=3s — partagé entre risk, dashboard et signals."""
+        """Prix avec cache TTL=3s — partagé entre tous les appelants."""
         now = time.time()
         with self._price_lock:
             if symbol in self._price_cache:
@@ -103,22 +102,6 @@ class BinanceClientWrapper:
                 self._balance_cache.pop(asset, None)
             else:
                 self._balance_cache.clear()
-
-    def get_all_usdc_pairs(self):
-        try:
-            info = self.client.get_exchange_info()
-            return [
-                s['symbol'] for s in info['symbols']
-                if s['symbol'].endswith('USDC') and s['status'] == 'TRADING'
-            ]
-        except:
-            return []
-
-    def get_24h_volume(self, symbol):
-        try:
-            return float(self.client.get_ticker(symbol=symbol)['quoteVolume'])
-        except:
-            return 0.0
 
     def get_all_balances(self):
         try:

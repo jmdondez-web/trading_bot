@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""JM Trading Bot V3.4 - Point d'entrée"""
+"""JM Trading Bot V3.4 - Point d'entrée (mean-reversion 5m, DRY_RUN par défaut)"""
 import time
 import logging
 import traceback
@@ -13,30 +13,12 @@ from websocket_client import WebSocketClient
 from orders import OrderManager
 from risk import RiskManager
 from signals import SignalManager
-from scalping import ScalpingEngine
-from dust_manager import DustManager
-from scanner import DynamicPairScanner
-from committee import TradingCommittee
 from telegram_interface import TelegramInterface
-from dashboard import Dashboard
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 log_handler = RotatingFileHandler("bot_v3.4.log", maxBytes=10*1024*1024, backupCount=3)
 log_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logging.basicConfig(level=logging.INFO, handlers=[log_handler, logging.StreamHandler()])
 logger = logging.getLogger("TradingCoreV3.4")
-
-class GoogleSheetsClient:
-    def __init__(self):
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(Config.GOOGLE_CREDS_FILE, scope)
-        self.client = gspread.authorize(creds)
-        self.sheet = self.client.open_by_key(Config.GOOGLE_SHEET_KEY).worksheet("Journal")
-
-    def append_row(self, data):
-        try: self.sheet.append_row(data, value_input_option='USER_ENTERED')
-        except: pass
 
 class TelegramNotifier:
     def __init__(self):
@@ -54,26 +36,19 @@ class TelegramNotifier:
 class TradingCore:
     def __init__(self):
         self.binance = BinanceClientWrapper()
-        self.sheets = GoogleSheetsClient()
         self.telegram = TelegramNotifier()
         self.db = Database()
         # FIX: binance_wrapper passé en 3e argument — sans lui, get_real_quantity()
         # retournait toujours 0.0 et la quantité DB était utilisée sans vérification Binance
         self.order_manager = OrderManager(self.binance.client, self.db, self.binance)
         self.risk = RiskManager(self.db, self.binance, self.order_manager, self.telegram)
-        self.dust = DustManager(self.db, self.binance, self.order_manager, self.telegram)
-        self.dynamic_scanner = DynamicPairScanner(self.binance)
-        self.committee = TradingCommittee(self.db)
         self.signals = SignalManager(self.db, self.binance, self.order_manager, self.risk, self.telegram)
-        self.scalping = ScalpingEngine(self.signals)
-        self.websocket = WebSocketClient(self.binance, self.risk, self.dust)
+        self.websocket = WebSocketClient(self.binance, self.risk)
         self.telegram_interface = TelegramInterface(self)
-        self.dashboard = Dashboard(self.db, self.binance)
         self.last_sync = None
         self._restore_config()
         self._sync_positions_from_binance()
         self.websocket.start()
-        self.dashboard.run()
 
     def _restore_config(self):
         conf = self.db.get_all_config()
@@ -83,12 +58,9 @@ class TradingCore:
             ('trailing_distance','TRAILING_STOP_DISTANCE'),('macd_filter','MACD_FILTER_ENABLED'),
             ('capital_risk_percent','CAPITAL_RISK_PERCENT'),('heartbeat_hours','HEARTBEAT_HOURS'),
             ('bb_margin_percent','BB_MARGIN_PERCENT'),('take_profit_percent','TAKE_PROFIT_PERCENT'),
-            ('take_profit_size','TAKE_PROFIT_SIZE'),('auto_mode','AUTO_MODE'),('auto_scan','AUTO_SCAN'),
-            ('max_positions','MAX_POSITIONS'),('range_vr_threshold','RANGE_VR_THRESHOLD'),
-            ('turbo_mode','TURBO_MODE'),('committee_enabled','COMMITTEE_ENABLED'),
-            ('night_mode','NIGHT_MODE'),('use_trailing_atr','USE_TRAILING_ATR'),
-            ('cooldown_adaptive','COOLDOWN_ADAPTIVE'),('scalp_mode','SCALP_MODE'),
-            ('dust_auto_sell','DUST_AUTO_SELL'),
+            ('take_profit_size','TAKE_PROFIT_SIZE'),('max_positions','MAX_POSITIONS'),
+            ('range_vr_threshold','RANGE_VR_THRESHOLD'),('use_trailing_atr','USE_TRAILING_ATR'),
+            ('cooldown_adaptive','COOLDOWN_ADAPTIVE'),
             # FIX: dry_run et core_symbols étaient en DB mais jamais restaurés.
             # dry_run manquant = bot redémarre en DRY_RUN (défaut code) alors
             # qu'il était en production → ordres ignorés silencieusement ou inversement.
@@ -103,8 +75,7 @@ class TradingCore:
                     # FIX: les booléens Python ('True'/'False') ne sont pas du JSON valide
                     # (json exige 'true'/'false' en minuscules). Sans ce fallback, json.loads
                     # échoue et la chaîne brute "False" est stockée — toujours truthy en
-                    # Python, ce qui activait TURBO_MODE/COMMITTEE_ENABLED malgré une valeur
-                    # 'False' en DB (124 signaux rejetés silencieusement par le Comité).
+                    # Python, ce qui activait des modes malgré une valeur 'False' en DB.
                     try:
                         setattr(Config, attr, json.loads(value.lower()))
                     except (ValueError, TypeError, AttributeError):
@@ -112,9 +83,7 @@ class TradingCore:
 
         # Log explicite du mode après restauration pour éviter toute ambiguïté
         mode_str = "DRY RUN" if Config.DRY_RUN else "PRODUCTION"
-        turbo_str = " + TURBO" if Config.TURBO_MODE else ""
-        scalp_str = " + SCALP" if Config.SCALP_MODE else ""
-        logger.info(f"Config restaurée — Mode: {mode_str}{turbo_str}{scalp_str}")
+        logger.info(f"Config restaurée — Mode: {mode_str}")
 
     def _sync_positions_from_binance(self):
         try:
@@ -171,30 +140,23 @@ class TradingCore:
 
     def run_forever(self):
         mode = "DRY RUN" if Config.DRY_RUN else "PRODUCTION"
-        if Config.SCALP_MODE: mode += " SCALPING"
-        elif Config.TURBO_MODE: mode += " TURBO"
         self.telegram.send(f"Bot V3.4\nMode: {mode}\nCommandes: /help")
         last_cmd = datetime.now()
         while True:
             try:
                 self.check_heartbeat()
                 self.check_periodic_sync()
-                # FIX: check_entry_orders() supprimé ici.
-                # Le WebSocketClient._check_orders() (polling 2s) gère déjà les ordres
-                # PENDING avec timeout. Garder les deux causait une double vérification
-                # et des appels API redondants à chaque cycle de 1s.
+                # Les ordres PENDING (limites non exécutées) sont suivis par
+                # WebSocketClient._check_orders() (polling 2s, timeout inclus).
                 self.risk.check_take_profit()
                 self.risk.check_stop_loss()
-                self.dust.check_and_clean()
-                signals = self.signals.scan_all_pairs(self.dynamic_scanner)
+                signals = self.signals.scan_all_pairs()
                 for signal in signals:
-                    self.signals.execute_signal(signal, self.committee)
+                    self.signals.execute_signal(signal)
                 if (datetime.now() - last_cmd).total_seconds() >= Config.TELEGRAM_CHECK_SECONDS:
                     self.telegram_interface.check()
                     last_cmd = datetime.now()
-                time.sleep(Config.LOOP_SLEEP_SECONDS)  # FIX: utilise LOOP_SLEEP_SECONDS (45s)
-                                                        # au lieu de time.sleep(1) qui bouclait
-                                                        # 45x trop vite et saturait l'API Binance
+                time.sleep(Config.LOOP_SLEEP_SECONDS)  # 45s — évite de saturer l'API Binance
             except KeyboardInterrupt:
                 self.telegram.send("Bot arrete."); break
             except Exception as e:

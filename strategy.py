@@ -16,7 +16,7 @@ class StrategyEngine:
     @staticmethod
     def calculate_rsi(series, period=None):
         if period is None:
-            period = Config.SCALP_RSI_PERIOD if Config.SCALP_MODE else Config.RSI_PERIOD
+            period = Config.RSI_PERIOD
         delta = series.diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -54,7 +54,7 @@ class StrategyEngine:
 
     @classmethod
     def analyze(cls, df, symbol):
-        min_len = Config.SCALP_RSI_PERIOD if Config.SCALP_MODE else Config.BB_PERIOD
+        min_len = Config.BB_PERIOD
         # FIX: RSI_RISING_TICKS ticks requis -> besoin d'au moins min_len + RSI_RISING_TICKS bougies
         if df.empty or len(df) < (min_len + RSI_RISING_TICKS):
             return {"context": "INSUFFICIENT_DATA", "decision": "DENY",
@@ -111,12 +111,10 @@ class StrategyEngine:
             pass  # loggé dans signals.py via le champ reason
 
         decision, reason = "DENY", ""
-        threshold = Config.SCALP_RSI_THRESHOLD if Config.SCALP_MODE \
-            else Config.RSI_THRESHOLDS.get(symbol, 38)
+        threshold = Config.RSI_THRESHOLDS.get(symbol, 38)
         macd_bullish = macd_line.iloc[-1] > signal_line.iloc[-1]
 
-        allowed_contexts = ["RANGE_CALME"] if not Config.SCALP_MODE \
-            else ["RANGE_CALME", "NEUTRE"]
+        allowed_contexts = ["RANGE_CALME"]
 
         if context_state in allowed_contexts:
             price_near_lower = bb_position == "BELOW_LOWER"
@@ -126,7 +124,7 @@ class StrategyEngine:
             # on considère quand même que le prix est "près du bas".
             # Risque : avec BB_MARGIN=2.5%, on peut entrer jusqu'à +2.5% du Lower Band
             # ce qui dilue la qualité Mean Reversion. Valeur recommandée : <=1.5%.
-            if not price_near_lower and Config.BB_MARGIN_PERCENT > 0 and not Config.SCALP_MODE:
+            if not price_near_lower and Config.BB_MARGIN_PERCENT > 0:
                 distance = (last_price - bb.lower.iloc[-1]) / bb.lower.iloc[-1]
                 if distance <= Config.BB_MARGIN_PERCENT / 100:
                     price_near_lower = True
@@ -174,8 +172,7 @@ class StrategyEngine:
         result = cls.analyze(df, symbol)
         if result['decision'] == "DENY":
             return 0
-        threshold = Config.SCALP_RSI_THRESHOLD if Config.SCALP_MODE \
-            else Config.RSI_THRESHOLDS.get(symbol, 38)
+        threshold = Config.RSI_THRESHOLDS.get(symbol, 38)
         rsi_score = max(0, (threshold - result['rsi'])) / 10
         bb_score = 2 if result['bb_position'] == "BELOW_LOWER" \
             else (1 if Config.BB_MARGIN_PERCENT > 0 else 0)
