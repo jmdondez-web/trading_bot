@@ -27,7 +27,6 @@ class TestRiskManagerPending(unittest.TestCase):
         self.orders.adjust_quantity.return_value = 0.5
         self.orders.place_market_sell_order.return_value = {'orderId': 1}
         Config.TAKE_PROFIT_PERCENT = 3.0
-        Config.SCALP_MODE = False
 
     def test_take_profit_ignores_pending(self):
         self.db.get_positions.return_value = [make_pos('PENDING')]
